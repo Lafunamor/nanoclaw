@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -123,7 +124,11 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .filter(
+      (c) =>
+        c.jid !== '__group_sync__' &&
+        (c.is_group || c.jid.startsWith('tg:') || c.jid.startsWith('signal:')),
+    )
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -465,7 +470,49 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function acquirePidLock(): void {
+  const pidFile = path.join(DATA_DIR, 'nanoclaw.pid');
+
+  try {
+    const existing = fs.readFileSync(pidFile, 'utf-8').trim();
+    const existingPid = parseInt(existing, 10);
+    if (!isNaN(existingPid) && existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0); // signal 0 = existence check only
+        logger.error(
+          { existingPid },
+          'Another nanoclaw instance is already running',
+        );
+        console.error(
+          `\nFATAL: Another nanoclaw instance is already running (PID ${existingPid}).\n` +
+            `Stop it first: kill ${existingPid}  or  sudo systemctl stop nanoclaw\n`,
+        );
+        // Exit 78 (EX_CONFIG) tells systemd this is a permanent conflict,
+        // not a transient failure — RestartPreventExitStatus=78 in the
+        // service file ensures it won't keep retrying while the real
+        // instance is alive.
+        process.exit(78);
+      } catch {
+        logger.warn({ existingPid }, 'Removing stale PID lock file');
+      }
+    }
+  } catch {
+    // No PID file or unreadable — first instance, continue
+  }
+
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(pidFile, String(process.pid));
+  process.on('exit', () => {
+    try {
+      fs.unlinkSync(pidFile);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -519,6 +566,35 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
+  // Connect a channel with a timeout so one failing channel doesn't block others.
+  const connectChannelSafely = async (
+    channel: Channel,
+    timeoutMs = 30000,
+  ): Promise<void> => {
+    try {
+      await Promise.race([
+        channel.connect(),
+        new Promise<void>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `${channel.name} connection timed out after ${timeoutMs}ms`,
+                ),
+              ),
+            timeoutMs,
+          ),
+        ),
+      ]);
+      logger.info({ channel: channel.name }, 'Channel connected');
+    } catch (err) {
+      logger.error(
+        { channel: channel.name, err },
+        'Channel failed to connect — service continues without it',
+      );
+    }
+  };
+
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
@@ -533,7 +609,7 @@ async function main(): Promise<void> {
       continue;
     }
     channels.push(channel);
-    await channel.connect();
+    await connectChannelSafely(channel);
   }
   if (channels.length === 0) {
     logger.fatal('No channels connected');

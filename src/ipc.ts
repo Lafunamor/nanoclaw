@@ -74,12 +74,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
+                // Authorization: main group can send anywhere; other groups can
+                // send to themselves or any other registered channel/group.
                 const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
+                if (isMain || targetGroup) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
@@ -88,7 +86,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                    'Unauthorized IPC message attempt blocked (target not registered)',
                   );
                 }
               }

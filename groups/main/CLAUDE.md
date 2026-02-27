@@ -43,15 +43,15 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
+Use plain text. Avoid markdown headings (##). Prefer:
+- *Bold* (single asterisks) or **bold** — both work in Telegram
 - _Italic_ (underscores)
-- • Bullets (bullet points)
+- • Bullets
 - ```Code blocks``` (triple backticks)
 
-Keep messages clean and readable for WhatsApp.
+Keep messages concise and readable.
 
 ---
 
