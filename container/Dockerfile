@@ -24,7 +24,15 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install OCI CLI in a virtual environment to avoid system package conflicts
+RUN python3 -m venv /opt/oci-venv \
+    && /opt/oci-venv/bin/pip install oci-cli \
+    && ln -s /opt/oci-venv/bin/oci /usr/local/bin/oci
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

@@ -392,6 +392,14 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: (() => {
+        try {
+          const m = fs.readFileSync('/workspace/group/model.txt', 'utf-8').trim();
+          return m || 'claude-haiku-4-5-20251001';
+        } catch {
+          return 'claude-haiku-4-5-20251001';
+        }
+      })(),
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,

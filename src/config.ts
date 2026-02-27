@@ -13,6 +13,12 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';
+export const SIGNAL_PHONE = process.env.SIGNAL_PHONE || '';
+export const SIGNAL_RPC_URL =
+  process.env.SIGNAL_RPC_URL || 'http://127.0.0.1:7583/api/v1/rpc';
+export const SIGNAL_ONLY = process.env.SIGNAL_ONLY === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

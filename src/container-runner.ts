@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -249,6 +250,13 @@ function buildContainerArgs(
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
+  }
+
+  // Mount OCI CLI credentials at the same absolute path as on the host so
+  // key_file entries in ~/.oci/config resolve correctly inside the container.
+  const ociDir = path.join(os.homedir(), '.oci');
+  if (fs.existsSync(ociDir)) {
+    args.push(...readonlyMountArgs(ociDir, path.join(os.homedir(), '.oci')));
   }
 
   for (const mount of mounts) {
@@ -699,8 +707,12 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
+  // Main sees all groups (registered + unregistered, for activation).
+  // Non-main groups see only registered groups so they know what channels
+  // they can send cross-channel messages to via send_message.
+  const visibleGroups = isMain
+    ? groups
+    : groups.filter((g) => _registeredJids.has(g.jid));
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

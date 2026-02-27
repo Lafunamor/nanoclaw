@@ -5,17 +5,75 @@
  *
  * Two auth modes:
  *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
- *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ *   OAuth:    Container CLI attempts to exchange its placeholder token for a
+ *             temp API key via /api/oauth/claude_cli/create_api_key.
+ *             The proxy intercepts this exchange and returns the current
+ *             OAuth access token as the "API key" (the Anthropic API accepts
+ *             claude.ai OAuth access tokens as x-api-key values).
+ *             Subsequent requests carry this token as x-api-key and pass
+ *             through the proxy without modification.
  */
+import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+
+const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+
+function readCreds(): { accessToken?: string; expiresAt?: number } {
+  try {
+    const creds = JSON.parse(fs.readFileSync(CREDS_PATH, 'utf-8'));
+    return creds?.claudeAiOauth ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Read the current OAuth access token from ~/.claude/.credentials.json. */
+function readCredentialsToken(): string | undefined {
+  return readCreds().accessToken;
+}
+
+/**
+ * Start a background loop that refreshes the OAuth access token before it
+ * expires. The host `claude` CLI manages the token lifecycle — running it
+ * with a cheap API call forces a refresh through the normal OAuth flow.
+ * Checks every hour; refreshes when fewer than 90 minutes remain.
+ */
+export function startTokenRefreshLoop(): void {
+  const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+  const REFRESH_THRESHOLD_MS = 90 * 60 * 1000; // refresh when < 90 min left
+
+  const check = (): void => {
+    const { expiresAt } = readCreds();
+    if (!expiresAt) return;
+    const remaining = expiresAt - Date.now();
+    if (remaining < REFRESH_THRESHOLD_MS) {
+      logger.info(
+        { remainingMin: Math.round(remaining / 60000) },
+        'OAuth token expiring soon, refreshing via claude CLI',
+      );
+      // Spawn claude with a minimal prompt; the CLI refreshes the token as
+      // part of its normal auth flow before making any API call.
+      const child = spawn('claude', ['-p', 'ok', '--output-format', 'text'], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, ANTHROPIC_BASE_URL: undefined },
+      });
+      child.unref();
+    }
+  };
+
+  // Check immediately on startup, then on interval
+  setTimeout(check, 5000);
+  setInterval(check, CHECK_INTERVAL_MS);
+}
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -67,14 +125,36 @@ export function startCredentialProxy(
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
+          // OAuth mode: intercept the key-exchange endpoint.
+          // Personal claude.ai tokens lack org:create_api_key scope so the
+          // real endpoint returns 403. Return a mock success with the current
+          // access token instead; the Anthropic API accepts it as x-api-key.
+          if (
+            req.method === 'POST' &&
+            req.url?.includes('/api/oauth/claude_cli/create_api_key')
+          ) {
+            const token = readCredentialsToken() || oauthToken;
+            if (token) {
+              const mockBody = JSON.stringify({ raw_key: token });
+              res.writeHead(200, {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(mockBody),
+              });
+              res.end(mockBody);
+              logger.debug(
+                'Intercepted create_api_key exchange, returning access token',
+              );
+              return;
+            }
+          }
+
+          // For all other OAuth requests: replace placeholder Bearer with
+          // real token when present (auth probes etc.)
           if (headers['authorization']) {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            const token = readCredentialsToken() || oauthToken;
+            if (token) {
+              headers['authorization'] = `Bearer ${token}`;
             }
           }
         }
