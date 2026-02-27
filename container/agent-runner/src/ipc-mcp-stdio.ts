@@ -41,15 +41,27 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the current group or to any other registered channel/group. Use target_chat_jid to send cross-channel (e.g., from Signal to a WhatsApp group, or from one group to another). Read /workspace/ipc/available_groups.json for the list of registered channels and their JIDs. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
     text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
+      ),
+    target_chat_jid: z
+      .string()
+      .optional()
+      .describe(
+        'Send to a different registered chat instead of the current one. Find JIDs in /workspace/ipc/available_groups.json. Examples: "signal:+1234567890" (Signal DM), "signal:group:BASE64ID" (Signal group), "120363...@g.us" (WhatsApp group), "tg:-1234567" (Telegram chat).',
+      ),
   },
   async (args) => {
+    const targetJid = args.target_chat_jid || chatJid;
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,

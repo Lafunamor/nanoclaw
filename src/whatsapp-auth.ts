@@ -32,6 +32,11 @@ const logger = pino({
 const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
 
+// Track whether a pairing code was already issued so we know to reconnect on 405
+let pairingCodeIssued = false;
+let authRetryCount = 0;
+const AUTH_MAX_RETRIES = 6; // up to ~2 minutes of retries at 10s/20s/30s/40s/50s/60s
+
 function askQuestion(prompt: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -89,6 +94,7 @@ async function connectSocket(
         console.log('  2. Tap Settings → Linked Devices → Link a Device');
         console.log('  3. Tap "Link with phone number instead"');
         console.log(`  4. Enter this code: ${code}\n`);
+        pairingCodeIssued = true;
         fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
       } catch (err: any) {
         console.error('Failed to request pairing code:', err.message);
@@ -126,6 +132,22 @@ async function connectSocket(
         // registration completes. Reconnect to finish the handshake.
         console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
         connectSocket(phoneNumber, true);
+      } else if (reason === 405 && pairingCodeIssued) {
+        // 405 after pairing code is issued = WhatsApp closing the initial connection.
+        // Normal part of the pairing flow — reconnect to receive auth confirmation
+        // once the user enters the code on their phone.
+        console.log(
+          '\n⟳ Connection reset after pairing code — waiting for you to enter the code, then reconnecting...',
+        );
+        setTimeout(() => connectSocket(phoneNumber, true), 20000);
+      } else if (reason === 405 && authRetryCount < AUTH_MAX_RETRIES) {
+        // Rate limited before pairing code was issued — back off and retry
+        authRetryCount++;
+        const delay = authRetryCount * 10000;
+        console.log(
+          `\n⟳ Rate limited (405), retrying in ${delay / 1000}s (attempt ${authRetryCount}/${AUTH_MAX_RETRIES})...`,
+        );
+        setTimeout(() => connectSocket(phoneNumber), delay);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
         console.log('\n✗ Connection failed. Please try again.');

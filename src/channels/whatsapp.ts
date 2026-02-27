@@ -42,6 +42,8 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private authRequired = false;
+  private reconnectDelay = 5000; // starts at 5s, backs off on 405
 
   private opts: WhatsAppChannelOpts;
 
@@ -83,13 +85,13 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        if (!this.authRequired) {
+          this.authRequired = true;
+          logger.error(
+            'WhatsApp authentication required. Run /setup in Claude Code to re-authenticate.',
+          );
+        }
+        return;
       }
 
       if (connection === 'close') {
@@ -107,22 +109,35 @@ export class WhatsAppChannel implements Channel {
           'Connection closed',
         );
 
-        if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
-        } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+        if (shouldReconnect && !this.authRequired) {
+          // 405 = WhatsApp rate-limiting — back off exponentially (up to 5 minutes)
+          if (reason === 405) {
+            this.reconnectDelay = Math.min(
+              this.reconnectDelay * 2,
+              5 * 60 * 1000,
+            );
+            logger.warn(
+              { delay: this.reconnectDelay },
+              'WhatsApp rate limited (405), backing off before reconnect',
+            );
+          } else {
+            this.reconnectDelay = 5000;
+          }
+          logger.info({ delay: this.reconnectDelay }, 'Reconnecting...');
+          setTimeout(() => {
+            this.connectInternal(onFirstOpen).catch((err) => {
+              logger.error({ err }, 'Reconnect attempt failed');
+            });
+          }, this.reconnectDelay);
+        } else if (!shouldReconnect) {
+          this.authRequired = true;
+          logger.error(
+            'WhatsApp logged out. Run /setup in Claude Code to re-authenticate.',
+          );
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectDelay = 5000; // reset backoff on successful connect
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
