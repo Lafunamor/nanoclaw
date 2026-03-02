@@ -10,6 +10,70 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+/**
+ * Parse a naive local timestamp string (e.g. "2026-02-01T15:30:00") as if it
+ * were in the given IANA timezone, returning the equivalent UTC Date.
+ *
+ * This mirrors how cron expressions are handled — both use the TIMEZONE config
+ * constant rather than relying on the host process's TZ environment variable.
+ * The two may differ when the user's system TZ and the configured TIMEZONE
+ * diverge, which would cause 'once' tasks to fire at the wrong wall-clock time.
+ *
+ * Algorithm: treat the components as UTC to get a reference point, find the
+ * offset at that point by seeing what local time the target timezone shows,
+ * then adjust by that offset.  One Newton step is enough for non-ambiguous
+ * times; DST gaps/folds resolve to the post-transition side.
+ */
+export function parseLocalTimestamp(localTimestamp: string, timezone: string): Date {
+  const match = localTimestamp.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!match) return new Date(NaN);
+
+  const [, year, month, day, hour, minute, second = '0'] = match;
+
+  // Step 1: Treat the components as-if UTC to get a reference epoch.
+  const asIfUtc = new Date(
+    Date.UTC(
+      parseInt(year, 10),
+      parseInt(month, 10) - 1,
+      parseInt(day, 10),
+      parseInt(hour, 10),
+      parseInt(minute, 10),
+      parseInt(second, 10),
+    ),
+  );
+
+  // Step 2: Find what the target timezone's wall clock shows at that epoch.
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+  }).formatToParts(asIfUtc);
+
+  const get = (type: string): number =>
+    parseInt(parts.find((p) => p.type === type)!.value, 10);
+
+  const tzAsUtc = new Date(
+    Date.UTC(
+      get('year'),
+      get('month') - 1,
+      get('day'),
+      get('hour') % 24, // hour12:false may return 24 for midnight
+      get('minute'),
+      get('second'),
+    ),
+  );
+
+  // Step 3: The offset is the difference; shift asIfUtc by it to get true UTC.
+  return new Date(asIfUtc.getTime() + (asIfUtc.getTime() - tzAsUtc.getTime()));
+}
+
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -236,7 +300,7 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
+          const scheduled = parseLocalTimestamp(data.schedule_value, TIMEZONE);
           if (isNaN(scheduled.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },

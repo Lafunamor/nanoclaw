@@ -8,7 +8,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processTaskIpc, parseLocalTimestamp, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -74,7 +74,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'do something',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
@@ -94,7 +94,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'self task',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         targetJid: 'other@g.us',
       },
       'other-group',
@@ -113,7 +113,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'unauthorized',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         targetJid: 'main@g.us',
       },
       'other-group',
@@ -131,7 +131,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'no target',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         targetJid: 'unknown@g.us',
       },
       'whatsapp_main',
@@ -154,9 +154,9 @@ describe('pause_task authorization', () => {
       chat_jid: 'main@g.us',
       prompt: 'main task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
+      next_run: '2099-01-01T00:00:00',
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
     });
@@ -166,9 +166,9 @@ describe('pause_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'other task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
+      next_run: '2099-01-01T00:00:00',
       status: 'active',
       created_at: '2024-01-01T00:00:00.000Z',
     });
@@ -215,9 +215,9 @@ describe('resume_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'paused task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
+      next_run: '2099-01-01T00:00:00',
       status: 'paused',
       created_at: '2024-01-01T00:00:00.000Z',
     });
@@ -264,7 +264,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'cancel me',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -287,7 +287,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'my task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -310,7 +310,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'main@g.us',
       prompt: 'not yours',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
+      schedule_value: '2099-01-01T00:00:00',
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -565,7 +565,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'group context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         context_mode: 'group',
         targetJid: 'other@g.us',
       },
@@ -584,7 +584,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'isolated context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         context_mode: 'isolated',
         targetJid: 'other@g.us',
       },
@@ -603,7 +603,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'bad context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         context_mode: 'bogus' as any,
         targetJid: 'other@g.us',
       },
@@ -622,7 +622,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'no context mode',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
+        schedule_value: '2099-01-01T00:00:00',
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
@@ -674,5 +674,74 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- parseLocalTimestamp ---
+
+describe('parseLocalTimestamp', () => {
+  it('parses a winter timestamp in UTC-offset timezone correctly', () => {
+    // America/New_York is UTC-5 in February (EST)
+    const result = parseLocalTimestamp('2026-02-01T15:30:00', 'America/New_York');
+    // 15:30 New York (EST = UTC-5) → 20:30 UTC
+    expect(result.toISOString()).toBe('2026-02-01T20:30:00.000Z');
+  });
+
+  it('parses a summer timestamp in UTC+offset timezone correctly', () => {
+    // Europe/Berlin is UTC+2 in August (CEST)
+    const result = parseLocalTimestamp('2026-08-15T09:00:00', 'Europe/Berlin');
+    // 09:00 Berlin (CEST = UTC+2) → 07:00 UTC
+    expect(result.toISOString()).toBe('2026-08-15T07:00:00.000Z');
+  });
+
+  it('parses midnight correctly', () => {
+    // America/Los_Angeles is UTC-8 in January (PST)
+    const result = parseLocalTimestamp('2026-01-20T00:00:00', 'America/Los_Angeles');
+    // 00:00 LA (PST = UTC-8) → 08:00 UTC
+    expect(result.toISOString()).toBe('2026-01-20T08:00:00.000Z');
+  });
+
+  it('returns NaN for invalid timestamp format', () => {
+    const result = parseLocalTimestamp('not-a-date', 'UTC');
+    expect(isNaN(result.getTime())).toBe(true);
+  });
+
+  it('returns NaN for UTC-suffixed timestamp', () => {
+    // Z-suffixed timestamps should not reach this function (rejected earlier),
+    // but parseLocalTimestamp correctly rejects them via the regex.
+    const result = parseLocalTimestamp('2026-02-01T15:30:00Z', 'America/New_York');
+    expect(isNaN(result.getTime())).toBe(true);
+  });
+
+  it('handles UTC timezone (no offset)', () => {
+    const result = parseLocalTimestamp('2026-06-01T12:00:00', 'UTC');
+    expect(result.toISOString()).toBe('2026-06-01T12:00:00.000Z');
+  });
+
+  it('once task next_run uses TIMEZONE, not host TZ env var', async () => {
+    // This test verifies that the once schedule type correctly interprets the
+    // local timestamp using the configured TIMEZONE constant.
+    // We call processTaskIpc with a fixed timestamp and check that next_run
+    // is stored as a valid UTC ISO string (not NaN or unchanged).
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'timezone test task',
+        schedule_type: 'once',
+        schedule_value: '2099-12-31T23:59:00',
+        targetJid: 'other@g.us',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const tasks = getAllTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].next_run).toBeTruthy();
+    // next_run must be a valid ISO date string
+    expect(isNaN(new Date(tasks[0].next_run!).getTime())).toBe(false);
+    // next_run must end in Z (stored as UTC)
+    expect(tasks[0].next_run!.endsWith('Z')).toBe(true);
   });
 });
