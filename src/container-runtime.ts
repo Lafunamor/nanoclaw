@@ -10,6 +10,34 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
+/** Hostname containers use to reach the host. */
+export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+
+/**
+ * Host address the credential proxy should bind to.
+ * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
+ *   falling back to 0.0.0.0 if the interface isn't found.
+ */
+export const PROXY_BIND_HOST =
+  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
+
+function detectProxyBindHost(): string {
+  if (os.platform() === 'darwin') return '127.0.0.1';
+  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
+  if (process.env.WSL_DISTRO_NAME) return '127.0.0.1';
+  // Linux native Docker: bind to docker0 bridge so only containers can reach it.
+  try {
+    const ip = execSync(
+      "ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet )\\d+\\.\\d+\\.\\d+\\.\\d+'",
+      { encoding: 'utf8' },
+    ).trim();
+    if (ip) return ip;
+  } catch {
+    // fall through
+  }
+  return '0.0.0.0';
+}
+
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
   // On Linux, host.docker.internal isn't built-in — add it explicitly
